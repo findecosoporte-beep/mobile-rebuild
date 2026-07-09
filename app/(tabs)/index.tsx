@@ -12,9 +12,11 @@ import {
 } from 'react-native'
 
 import { api, apiErrorMessage } from '@/lib/api'
-import { Screen } from '@/components/Screen'
+import { Screen, useTabListPadding } from '@/components/Screen'
+import { navigateToCobro } from '@/lib/navigateToCobro'
 import { useAuth } from '@/lib/auth'
 import { formatMoney } from '@/lib/format'
+import { resumenCobroFila } from '@/lib/cobroResumen'
 import { colors, shadows } from '@/lib/theme'
 import { useScreenPolling } from '@/lib/useScreenPolling'
 import type { Cartera, ReporteIntegracionFila, ReporteIntegracionResponse } from '@/lib/types'
@@ -23,6 +25,7 @@ const REFRESCO_MS = 30000
 
 export default function HojaCobrosScreen() {
   const router = useRouter()
+  const listPaddingBottom = useTabListPadding()
   const { profile } = useAuth()
   const [carteras, setCarteras] = useState<Cartera[]>([])
   const [carteraId, setCarteraId] = useState<number | null>(null)
@@ -124,7 +127,7 @@ export default function HojaCobrosScreen() {
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={() => void refrescar(false)} tintColor={colors.primaryDark} />
           }
-          contentContainerStyle={filas.length === 0 ? styles.emptyList : [styles.list, { paddingBottom: 24 }]}
+          contentContainerStyle={filas.length === 0 ? styles.emptyList : [styles.list, { paddingBottom: listPaddingBottom }]}
           ListEmptyComponent={
             !loading ? (
               <View style={styles.emptyState}>
@@ -135,28 +138,12 @@ export default function HojaCobrosScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item, index }) => (
+          renderItem={({ item, index }) => {
+            const cobro = resumenCobroFila(item)
+            return (
             <Pressable
               style={styles.row}
-              onPress={() =>
-                router.push({
-                  pathname: '/pago/[id]',
-                  params: {
-                    id: String(item.id_prestamo),
-                    numero: item.numero_prestamo,
-                    cliente: item.nombre_cliente,
-                    cuota: item.cuota_siguiente_monto ?? item.cuota,
-                    cuotaNumero: String(item.cuota_siguiente_numero ?? 1),
-                    saldo: item.saldo_actual,
-                    telefono: item.telefono ?? '',
-                    direccionResidencia: item.direccion_residencia ?? '',
-                    direccionNegocio: item.direccion_negocio ?? '',
-                    referencia: item.referencia ?? '',
-                    referenciaParentesco: item.referencia_parentesco ?? '',
-                    referenciaTelefono: item.referencia_telefono ?? '',
-                  },
-                })
-              }
+              onPress={() => navigateToCobro(router, item)}
             >
               <View style={styles.rowTop}>
                 <View style={styles.indexBadge}>
@@ -176,11 +163,31 @@ export default function HojaCobrosScreen() {
                   ) : null}
                 </View>
                 <View style={styles.cuotaBlock}>
-                  <Text style={styles.cuotaLabel}>Cuota</Text>
-                  <Text style={styles.cuotaMonto}>{formatMoney(item.cuota_siguiente_monto ?? item.cuota)}</Text>
+                  <Text style={styles.cuotaLabel}>Cuota #{cobro.numeroCuota}</Text>
+                  <Text style={styles.cuotaMonto}>{formatMoney(cobro.aCobrarHoy)}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </View>
+
+              <View style={styles.cobroDetalle}>
+                {cobro.tieneAbonoAnterior ? (
+                  <View style={styles.cobroLinea}>
+                    <Text style={styles.cobroLineaLabel}>
+                      Abono cuota {cobro.numeroCuotaAnterior ?? cobro.numeroCuota}
+                    </Text>
+                    <Text style={styles.cobroLineaValor}>{formatMoney(cobro.abonoAnterior)}</Text>
+                  </View>
+                ) : null}
+                <View style={styles.cobroLinea}>
+                  <Text style={styles.cobroLineaLabel}>Cuota #{cobro.numeroCuota}</Text>
+                  <Text style={styles.cobroLineaValor}>{formatMoney(cobro.montoCuotaProgramado)}</Text>
+                </View>
+                <View style={[styles.cobroLinea, styles.cobroTotalLinea]}>
+                  <Text style={styles.cobroTotalLabel}>Abono + cuota</Text>
+                  <Text style={styles.cobroTotalValor}>{formatMoney(cobro.totalAbonoMasCuota)}</Text>
+                </View>
+              </View>
+
               {item.cuotas_atrasadas ? (
                 <View style={styles.atrasoBox}>
                   <Ionicons name="warning-outline" size={14} color={colors.danger} />
@@ -191,10 +198,13 @@ export default function HojaCobrosScreen() {
               ) : null}
               <View style={styles.saldoRow}>
                 <Ionicons name="cash-outline" size={14} color={colors.textMuted} />
+                <Text style={styles.saldoLabel}>A cobrar hoy: {formatMoney(cobro.aCobrarHoy)}</Text>
+                <Text style={styles.saldoSep}>·</Text>
                 <Text style={styles.saldoLabel}>Saldo: {formatMoney(item.saldo_actual)}</Text>
               </View>
             </Pressable>
-          )}
+            )
+          }}
         />
       )}
     </Screen>
@@ -261,6 +271,47 @@ const styles = StyleSheet.create({
   cuotaBlock: { alignItems: 'flex-end' },
   cuotaLabel: { fontFamily: 'PlusJakartaSans_500Medium', fontSize: 10, color: colors.textMuted, textTransform: 'uppercase' },
   cuotaMonto: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 15, color: colors.primaryDark },
+  cobroDetalle: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 4,
+  },
+  cobroLinea: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cobroLineaLabel: {
+    flex: 1,
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  cobroLineaValor: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: colors.text,
+  },
+  cobroTotalLinea: {
+    marginTop: 2,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  cobroTotalLabel: {
+    flex: 1,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: colors.primaryDark,
+  },
+  cobroTotalValor: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 13,
+    color: colors.primaryDark,
+  },
   atrasoBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -277,7 +328,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.danger,
   },
-  saldoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
+  saldoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, flexWrap: 'wrap' },
+  saldoSep: { color: colors.textMuted, fontSize: 12 },
   saldoLabel: {
     fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 12,

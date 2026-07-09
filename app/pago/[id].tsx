@@ -6,12 +6,16 @@ import { useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { api, apiErrorMessage } from '@/lib/api'
 import { ClienteInfoCard } from '@/components/ClienteInfoCard'
@@ -22,6 +26,7 @@ import type { PagoCreateResponse } from '@/lib/types'
 
 export default function PagoScreen() {
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const params = useLocalSearchParams<{
     id: string
     numero?: string
@@ -107,76 +112,105 @@ export default function PagoScreen() {
 
   return (
     <Screen edges={['bottom', 'left', 'right']} style={styles.screen}>
-      <View style={styles.clientCard}>
-        <View style={styles.clientIcon}>
-          <Ionicons name="person" size={24} color={colors.primaryDark} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{params.cliente ?? 'Cliente'}</Text>
-          <View style={styles.subtitleRow}>
-            <Ionicons name="document-text-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.subtitle}>{params.numero ?? ''}</Text>
-          </View>
-        </View>
-      </View>
-
-      <ClienteInfoCard
-        telefono={params.telefono}
-        direccionResidencia={params.direccionResidencia}
-        direccionNegocio={params.direccionNegocio}
-        referencia={params.referencia}
-        referenciaParentesco={params.referenciaParentesco}
-        referenciaTelefono={params.referenciaTelefono}
-      />
-
-      <View style={styles.cuotaCard}>
-        <View style={styles.cuotaHeader}>
-          <Ionicons name="calculator-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.label}>Cuota sugerida</Text>
-        </View>
-        <Text style={styles.cuota}>{formatMoney(cuotaSugerida)}</Text>
-      </View>
-
-      <Text style={styles.inputLabel}>Monto recibido</Text>
-      <View style={styles.inputRow}>
-        <Ionicons name="cash-outline" size={22} color={colors.textSecondary} />
-        <TextInput
-          keyboardType="decimal-pad"
-          placeholder="0.00"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          value={montoRecibido}
-          onChangeText={setMontoRecibido}
-        />
-      </View>
-
-      {error ? (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
-          <Text style={styles.error}>{error}</Text>
-        </View>
-      ) : null}
-
-      <Pressable
-        disabled={loading}
-        style={[styles.button, loading && styles.buttonDisabled]}
-        onPress={() => void confirmarCobro()}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
       >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <>
-            <Ionicons name="checkmark-circle-outline" size={22} color="#fff" />
-            <Text style={styles.buttonText}>Confirmar cobro</Text>
-          </>
-        )}
-      </Pressable>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.clientCard}>
+            <View style={styles.clientIcon}>
+              <Ionicons name="person" size={24} color={colors.primaryDark} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>{params.cliente ?? 'Cliente'}</Text>
+              <View style={styles.subtitleRow}>
+                <Ionicons name="document-text-outline" size={14} color={colors.textMuted} />
+                <Text style={styles.subtitle}>{params.numero ?? ''}</Text>
+              </View>
+            </View>
+          </View>
+
+          <ClienteInfoCard
+            telefono={params.telefono}
+            direccionResidencia={params.direccionResidencia}
+            direccionNegocio={params.direccionNegocio}
+            referencia={params.referencia}
+            referenciaParentesco={params.referenciaParentesco}
+            referenciaTelefono={params.referenciaTelefono}
+          />
+
+          <View style={styles.cuotaCard}>
+            <View style={styles.cuotaHeader}>
+              <Ionicons name="calculator-outline" size={18} color={colors.textSecondary} />
+              <Text style={styles.label}>Cuota sugerida</Text>
+            </View>
+            <Text style={styles.cuota}>{formatMoney(cuotaSugerida)}</Text>
+          </View>
+        </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <Text style={styles.inputLabel}>Monto recibido</Text>
+          <View style={styles.inputRow}>
+            <Ionicons name="cash-outline" size={22} color={colors.textSecondary} />
+            <TextInput
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+              value={montoRecibido}
+              onChangeText={setMontoRecibido}
+              returnKeyType="done"
+            />
+          </View>
+
+          {error ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+              <Text style={styles.error}>{error}</Text>
+            </View>
+          ) : null}
+
+          <Pressable
+            disabled={loading}
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={() => void confirmarCobro()}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="checkmark-circle-outline" size={22} color="#fff" />
+                <Text style={styles.buttonText}>Confirmar cobro</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
     </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, padding: 20 },
+  screen: { flex: 1 },
+  flex: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
+  },
   clientCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -204,7 +238,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryLight,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 4,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -234,14 +268,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 12,
+    marginTop: 10,
     backgroundColor: colors.dangerLight,
     padding: 10,
     borderRadius: 8,
   },
   error: { flex: 1, color: colors.danger, fontFamily: 'PlusJakartaSans_500Medium', fontSize: 13 },
   button: {
-    marginTop: 24,
+    marginTop: 12,
     backgroundColor: colors.primaryDark,
     borderRadius: 12,
     paddingVertical: 16,

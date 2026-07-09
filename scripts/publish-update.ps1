@@ -14,7 +14,7 @@ Push-Location $ProjectRoot
 try {
   Write-Host ">> Publicando OTA desde $ProjectRoot ..."
   Write-Host ">> Canal: $Channel"
-  npx eas update --channel $Channel --message $Message
+  npx eas update --channel $Channel --environment $Channel --message $Message
   if ($LASTEXITCODE -ne 0) {
     throw "eas update falló (código $LASTEXITCODE)"
   }

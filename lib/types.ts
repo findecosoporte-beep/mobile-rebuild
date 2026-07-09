@@ -49,6 +49,13 @@ export interface ReporteIntegracionFila {
   cuota: string
   cuota_siguiente_numero?: number | null
   cuota_siguiente_monto?: string | null
+  cuota_siguiente_capital?: string | null
+  cuota_siguiente_interes?: string | null
+  cuota_siguiente_monto_programado?: string | null
+  cuota_siguiente_abonado?: string | null
+  cuota_anterior_numero?: number | null
+  cuota_anterior_abonado?: string | null
+  total_abono_anterior_mas_cuota?: string | null
   cuotas_atrasadas?: number
   cuotas_atrasadas_numeros?: string
   estado: string

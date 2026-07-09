@@ -2,6 +2,8 @@
 
 App **Expo / React Native** reconstruida a partir de la APK `FINDECO-Cobros-release.apk` (el código fuente original no estaba en el repositorio).
 
+**Documentación para usuarios y soporte:** ver [GUIA_Y_SOPORTE.md](./GUIA_Y_SOPORTE.md) (funcionamiento, flujos, problemas frecuentes y despliegue OTA/APK).
+
 ## Pantallas
 
 - **Login** — JWT (`/token/`, `/me/`)
