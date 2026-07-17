@@ -18,6 +18,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { api, apiErrorMessage } from '@/lib/api'
+import {
+  bluetoothImpresoraSoportado,
+  getImpresoraGuardada,
+  imprimirFacturaBluetooth,
+} from '@/lib/bluetoothPrinter'
 import { ClienteInfoCard } from '@/components/ClienteInfoCard'
 import { Screen } from '@/components/Screen'
 import { formatMoney, todayIsoDate } from '@/lib/format'
@@ -73,13 +78,53 @@ export default function PagoScreen() {
         monto_recibido: monto.toFixed(2),
       }
       const { data } = await api.post<PagoCreateResponse>('/pagos/', payload)
-      Alert.alert('Cobro registrado', 'El pago se guardó correctamente.', [
-        {
-          text: 'Ver factura',
-          onPress: () => void compartirFactura(data.id_pago),
-        },
-        { text: 'Cerrar', onPress: () => router.back() },
-      ])
+      const idPago = data.id_pago
+      const impresora = bluetoothImpresoraSoportado() ? await getImpresoraGuardada() : null
+
+      if (impresora) {
+        Alert.alert('Cobro registrado', '¿Imprimir factura por Bluetooth?', [
+          {
+            text: 'Imprimir',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await imprimirFacturaBluetooth(idPago)
+                  Alert.alert('Impresión', 'Factura enviada a la impresora.', [
+                    { text: 'OK', onPress: () => router.back() },
+                  ])
+                } catch (printError) {
+                  Alert.alert(
+                    'Impresión',
+                    printError instanceof Error
+                      ? printError.message
+                      : 'No se pudo imprimir. Puede compartir el PDF.',
+                    [
+                      {
+                        text: 'Compartir PDF',
+                        onPress: () => void compartirFactura(idPago),
+                      },
+                      { text: 'Cerrar', onPress: () => router.back() },
+                    ],
+                  )
+                }
+              })()
+            },
+          },
+          {
+            text: 'Compartir PDF',
+            onPress: () => void compartirFactura(idPago),
+          },
+          { text: 'Cerrar', onPress: () => router.back() },
+        ])
+      } else {
+        Alert.alert('Cobro registrado', 'El pago se guardó correctamente.', [
+          {
+            text: 'Ver factura',
+            onPress: () => void compartirFactura(idPago),
+          },
+          { text: 'Cerrar', onPress: () => router.back() },
+        ])
+      }
     } catch (e) {
       setError(apiErrorMessage(e, 'No se pudo registrar el cobro.'))
     } finally {

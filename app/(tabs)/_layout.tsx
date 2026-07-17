@@ -80,6 +80,14 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => <TabIcon name="receipt-outline" color={color} size={size} />,
         }}
       />
+      <Tabs.Screen
+        name="impresora"
+        options={{
+          title: 'Impresora Bluetooth',
+          tabBarLabel: 'Impresora',
+          tabBarIcon: ({ color, size }) => <TabIcon name="print-outline" color={color} size={size} />,
+        }}
+      />
     </Tabs>
   )
 }
