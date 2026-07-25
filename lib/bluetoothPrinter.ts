@@ -6,21 +6,51 @@ import { api } from '@/lib/api'
 const PRINTER_ADDRESS_KEY = 'findeco_bt_printer_address'
 const PRINTER_NAME_KEY = 'findeco_bt_printer_name'
 
+/**
+ * Perfil 3nStar PPT35BT con papel 80 mm.
+ * La factura impresa es exactamente GET /pagos/{id}/factura-png/?ticket=80
+ * (mismo PDF del backend convertido a PNG).
+ */
+export const PERFIL_3NSTAR_PPT35BT = {
+  ticket: '80' as const,
+  widthPx: 576,
+  paperWidthMm: 80,
+  etiqueta: '3nStar PPT35BT (80 mm)',
+}
+
 export interface ImpresoraBluetooth {
   address: string
   name: string
+  deviceType?: string
+}
+
+type TextStyle = {
+  align?: 'left' | 'center' | 'right'
+  bold?: boolean
+  size?: 'normal' | 'wide' | 'tall' | 'large'
 }
 
 type ThermalModule = {
   default: {
-    scan: () => Promise<{ paired?: Array<{ address?: string; name?: string }>; found?: Array<{ address?: string; name?: string }> }>
+    scan: () => Promise<{
+      paired?: Array<{ address?: string; name?: string; deviceType?: string }>
+      found?: Array<{ address?: string; name?: string; deviceType?: string }>
+    }>
     connect: (address: string, options?: { timeout?: number }) => Promise<void>
     disconnect: (address?: string) => Promise<void>
     print: (address: string, nodes: unknown[], options?: unknown) => Promise<unknown>
+    printRaw: (
+      address: string,
+      bytes: number[],
+      options?: unknown,
+    ) => Promise<{ success?: boolean; error?: string }>
   }
+  text: (content: string, style?: TextStyle) => unknown
+  line: (options?: { character?: string }) => unknown
   image: (source: { base64: string; width?: number }) => unknown
   feed: (lines: number) => unknown
   cut: (options?: { partial?: boolean }) => unknown
+  raw: (data: number[]) => unknown
 }
 
 let thermalModule: ThermalModule | null | undefined
@@ -46,6 +76,38 @@ function getThermalModule(): ThermalModule {
 
 export function bluetoothImpresoraSoportado(): boolean {
   return Platform.OS === 'android'
+}
+
+export function perfilImpresora() {
+  return PERFIL_3NSTAR_PPT35BT
+}
+
+/** Detecta nombres típicos de la 3nStar PPT35BT (a veces el BT muestra solo el serial). */
+export function nombreSugiere3nStarPpt35(name: string): boolean {
+  const n = name.toLowerCase().replace(/[\s_-]+/g, '')
+  return (
+    n.includes('3nstar') ||
+    n.includes('ppt35') ||
+    n.includes('ppt35bt') ||
+    n.includes('3nstarpt') ||
+    n.includes('3nstarppt') ||
+    /2033pa/.test(n) ||
+    /^4b\d/.test(n) ||
+    /ppt\d{2}/.test(n)
+  )
+}
+
+/** Normaliza dirección a Bluetooth Classic SPP (bt:) para PPT35BT. */
+export function normalizarDireccionImpresora(address: string, deviceType?: string): string {
+  const trimmed = String(address || '').trim()
+  const mac = trimmed.replace(/^(ble|bt|phomemo|mx11|cat|lan|tcp|3nstar):/i, '')
+  if (!mac) return trimmed
+
+  const lower = trimmed.toLowerCase()
+  if (lower.startsWith('ble:') || deviceType === 'ble') {
+    return `ble:${mac}`
+  }
+  return `bt:${mac}`
 }
 
 async function asegurarPermisosBluetooth(): Promise<void> {
@@ -75,13 +137,17 @@ export async function getImpresoraGuardada(): Promise<ImpresoraBluetooth | null>
     SecureStore.getItemAsync(PRINTER_NAME_KEY),
   ])
   if (!address) return null
-  return { address, name: name || address }
+  return {
+    address: normalizarDireccionImpresora(address),
+    name: name || address,
+  }
 }
 
 export async function guardarImpresora(printer: ImpresoraBluetooth): Promise<void> {
+  const address = normalizarDireccionImpresora(printer.address, printer.deviceType)
   await Promise.all([
-    SecureStore.setItemAsync(PRINTER_ADDRESS_KEY, printer.address),
-    SecureStore.setItemAsync(PRINTER_NAME_KEY, printer.name || printer.address),
+    SecureStore.setItemAsync(PRINTER_ADDRESS_KEY, address),
+    SecureStore.setItemAsync(PRINTER_NAME_KEY, printer.name || address),
   ])
 }
 
@@ -101,14 +167,20 @@ export async function escanearImpresoras(): Promise<ImpresoraBluetooth[]> {
   const { paired = [], found = [] } = await Thermal.default.scan()
   const mapa = new Map<string, ImpresoraBluetooth>()
   for (const device of [...paired, ...found]) {
-    const address = String(device.address || '').trim()
-    if (!address) continue
-    mapa.set(address, {
-      address,
-      name: String(device.name || address).trim() || address,
-    })
+    const raw = String(device.address || '').trim()
+    if (!raw) continue
+    const name = String(device.name || raw).trim() || raw
+    const deviceType = String(device.deviceType || 'unknown')
+    const address = normalizarDireccionImpresora(raw, deviceType)
+    mapa.set(address, { address, name, deviceType })
   }
-  return Array.from(mapa.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'))
+
+  return Array.from(mapa.values()).sort((a, b) => {
+    const aOk = nombreSugiere3nStarPpt35(a.name) ? 0 : 1
+    const bOk = nombreSugiere3nStarPpt35(b.name) ? 0 : 1
+    if (aOk !== bOk) return aOk - bOk
+    return a.name.localeCompare(b.name, 'es')
+  })
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -121,44 +193,76 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return globalThis.btoa(binary)
 }
 
+/** Misma factura del backend: PDF ticket → PNG térmico. */
 export async function descargarFacturaPngBase64(idPago: number): Promise<{
   base64: string
   width: number
 }> {
+  const perfil = perfilImpresora()
   const response = await api.get<ArrayBuffer>(`/pagos/${idPago}/factura-png/`, {
     responseType: 'arraybuffer',
+    params: { ticket: perfil.ticket },
   })
   return {
     base64: arrayBufferToBase64(response.data),
-    width: 384,
+    width: perfil.widthPx,
   }
 }
 
-export async function imprimirFacturaBluetooth(idPago: number): Promise<void> {
+async function conImpresoraConectada(
+  run: (Thermal: ThermalModule, address: string) => Promise<void>,
+): Promise<void> {
   if (!bluetoothImpresoraSoportado()) {
     throw new Error('La impresión Bluetooth térmica está disponible solo en Android.')
   }
   await asegurarPermisosBluetooth()
   const printer = await getImpresoraGuardada()
   if (!printer?.address) {
-    throw new Error('Seleccione una impresora Bluetooth en la pestaña Impresora.')
+    throw new Error('Seleccione la impresora 3nStar PPT35BT en la pestaña Impresora.')
   }
-
+  const address = normalizarDireccionImpresora(printer.address, printer.deviceType)
   const Thermal = getThermalModule()
-  const { base64, width } = await descargarFacturaPngBase64(idPago)
 
   try {
-    await Thermal.default.connect(printer.address, { timeout: 12000 })
-    await Thermal.default.print(printer.address, [
-      Thermal.image({ base64, width }),
-      Thermal.feed(3),
-      Thermal.cut(),
-    ])
+    await Thermal.default.connect(address, { timeout: 20000 })
+    await run(Thermal, address)
   } finally {
     try {
-      await Thermal.default.disconnect(printer.address)
+      await Thermal.default.disconnect(address)
     } catch {
-      // Ignorar fallo al desconectar; la impresión pudo completar.
+      // ignore
     }
   }
+}
+
+export async function probarImpresora(): Promise<void> {
+  const perfil = perfilImpresora()
+  await conImpresoraConectada(async (Thermal, address) => {
+    await Thermal.default.print(
+      address,
+      [
+        Thermal.text('FINDECO PPT35BT', { align: 'center', bold: true, size: 'large' }),
+        Thermal.text('Prueba OK', { align: 'center' }),
+        Thermal.text(`Papel ${perfil.paperWidthMm} mm`),
+        Thermal.feed(4),
+      ],
+      { timeout: 20000, paperWidthMm: perfil.paperWidthMm },
+    )
+  })
+}
+
+/**
+ * Imprime la factura oficial del backend (factura-png = mismo contenido que factura-pdf).
+ */
+export async function imprimirFacturaBluetooth(idPago: number): Promise<void> {
+  const perfil = perfilImpresora()
+  const { base64, width } = await descargarFacturaPngBase64(idPago)
+
+  await conImpresoraConectada(async (Thermal, address) => {
+    await Thermal.default.print(
+      address,
+      [Thermal.image({ base64, width }), Thermal.feed(5)],
+      { timeout: 60000, paperWidthMm: perfil.paperWidthMm },
+    )
+  })
 }

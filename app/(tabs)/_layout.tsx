@@ -75,8 +75,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="historial"
         options={{
-          title: 'Historial de cobros',
-          tabBarLabel: 'Historial',
+          title: 'Historial de facturas',
+          tabBarLabel: 'Facturas',
           tabBarIcon: ({ color, size }) => <TabIcon name="receipt-outline" color={color} size={size} />,
         }}
       />

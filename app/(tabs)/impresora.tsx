@@ -18,6 +18,9 @@ import {
   getImpresoraGuardada,
   guardarImpresora,
   limpiarImpresoraGuardada,
+  nombreSugiere3nStarPpt35,
+  perfilImpresora,
+  probarImpresora,
   type ImpresoraBluetooth,
 } from '@/lib/bluetoothPrinter'
 import { useScreenPolling } from '@/lib/useScreenPolling'
@@ -29,32 +32,41 @@ export default function ImpresoraScreen() {
   const [seleccionada, setSeleccionada] = useState<ImpresoraBluetooth | null>(null)
   const [error, setError] = useState('')
 
-  const cargarSeleccionada = useCallback(async () => {
+  const cargarEstado = useCallback(async () => {
     const actual = await getImpresoraGuardada()
     setSeleccionada(actual)
   }, [])
 
-  useScreenPolling(() => void cargarSeleccionada(), 15000)
+  useScreenPolling(() => void cargarEstado(), 15000)
 
   async function escanear() {
     if (!bluetoothImpresoraSoportado()) {
       Alert.alert(
         'Impresora',
-        'La impresión Bluetooth Classic está disponible solo en Android. En iOS use Compartir PDF.',
+        'La impresión Bluetooth está disponible solo en Android. En iOS use Compartir PDF.',
       )
       return
     }
     setLoading(true)
     setError('')
     try {
-      await cargarSeleccionada()
+      await cargarEstado()
       const lista = await escanearImpresoras()
       setImpresoras(lista)
       if (!lista.length) {
-        setError('No se encontraron impresoras. Empareje la térmica en Ajustes de Bluetooth y vuelva a buscar.')
+        setError(
+          'No se encontró la 3nStar PPT35BT. Emparéjela en Ajustes → Bluetooth y vuelva a buscar.',
+        )
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo escanear Bluetooth.')
+      const raw = e instanceof Error ? e.message : String(e || '')
+      if (/startDiscovery|SCAN_FAILED|permissions and location|Ubicaci/i.test(raw)) {
+        setError(
+          'Active la Ubicación (GPS) del teléfono y vuelva a pulsar Buscar. La impresora debe estar emparejada en Ajustes → Bluetooth.',
+        )
+      } else {
+        setError(raw || 'No se pudo escanear Bluetooth.')
+      }
     } finally {
       setLoading(false)
     }
@@ -63,7 +75,13 @@ export default function ImpresoraScreen() {
   async function seleccionar(item: ImpresoraBluetooth) {
     await guardarImpresora(item)
     setSeleccionada(item)
-    Alert.alert('Impresora', `Se usará «${item.name}» al imprimir facturas.`)
+    const esModelo = nombreSugiere3nStarPpt35(item.name)
+    Alert.alert(
+      esModelo ? '3nStar PPT35BT' : 'Impresora',
+      esModelo
+        ? `Se usará «${item.name}» (ESC/POS 80 mm) al imprimir facturas.`
+        : `Se guardó «${item.name}». Confirme que sea la 3nStar PPT35BT.`,
+    )
   }
 
   async function quitar() {
@@ -71,17 +89,53 @@ export default function ImpresoraScreen() {
     setSeleccionada(null)
   }
 
+  async function probar() {
+    if (!seleccionada) {
+      Alert.alert('Impresora', 'Seleccione la 3nStar PPT35BT primero.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      await probarImpresora()
+      Alert.alert(
+        'Prueba de conexión',
+        'Si el papel sale en blanco pero el motor suena: voltee el rollo térmico (solo una cara imprime). Si salió texto, al cobrar pulse Imprimir.',
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo probar la impresora.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const perfil = perfilImpresora()
+
   return (
     <Screen edges={['bottom', 'left', 'right']} style={styles.screen}>
       <View style={styles.card}>
         <Text style={styles.title}>Impresora Bluetooth</Text>
         <Text style={styles.hint}>
-          La factura se convierte a imagen (PNG) en el servidor y se envía por ESC/POS a la térmica
-          58 mm.
+          Configurada para <Text style={styles.hintBold}>3nStar PPT35BT</Text> — ticket{' '}
+          {perfil.paperWidthMm} mm. Al cobrar se imprime la{' '}
+          <Text style={styles.hintBold}>misma factura del servidor</Text> (factura-png). Empareje en
+          Ajustes → Bluetooth, deje la <Text style={styles.hintBold}>Ubicación (GPS) encendida</Text>{' '}
+          y pulse Buscar.
         </Text>
         {Platform.OS !== 'android' ? (
           <Text style={styles.warn}>En este dispositivo use «Compartir PDF» tras el cobro.</Text>
         ) : null}
+
+        <View style={styles.modeloBox}>
+          <Ionicons name="print" size={22} color={colors.primaryDark} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modeloTitle}>3nStar PPT35BT</Text>
+            <Text style={styles.modeloSub}>
+              {perfil.etiqueta} · {perfil.widthPx} px
+            </Text>
+          </View>
+        </View>
+
         <Text style={styles.selectedLabel}>Seleccionada</Text>
         <Text style={styles.selectedValue}>
           {seleccionada ? `${seleccionada.name}\n${seleccionada.address}` : 'Ninguna'}
@@ -103,6 +157,16 @@ export default function ImpresoraScreen() {
             </Pressable>
           ) : null}
         </View>
+        {seleccionada ? (
+          <Pressable
+            style={[styles.button, styles.testBtn]}
+            onPress={() => void probar()}
+            disabled={loading}
+          >
+            <Ionicons name="flask-outline" size={18} color={colors.primaryDark} />
+            <Text style={styles.testText}>Probar conexión</Text>
+          </Pressable>
+        ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
 
@@ -112,11 +176,14 @@ export default function ImpresoraScreen() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           !loading ? (
-            <Text style={styles.empty}>Pulse Buscar para listar impresoras emparejadas o cercanas.</Text>
+            <Text style={styles.empty}>
+              Pulse Buscar para listar la 3nStar PPT35BT emparejada o cercana.
+            </Text>
           ) : null
         }
         renderItem={({ item }) => {
           const activa = seleccionada?.address === item.address
+          const esModelo = nombreSugiere3nStarPpt35(item.name)
           return (
             <Pressable
               style={[styles.item, activa && styles.itemActive]}
@@ -130,6 +197,7 @@ export default function ImpresoraScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>{item.name}</Text>
                 <Text style={styles.itemAddress}>{item.address}</Text>
+                {esModelo ? <Text style={styles.badge}>PPT35BT</Text> : null}
               </View>
               {activa ? <Ionicons name="checkmark-circle" size={22} color={colors.primaryDark} /> : null}
             </Pressable>
@@ -159,11 +227,34 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     lineHeight: 18,
   },
+  hintBold: { fontFamily: 'PlusJakartaSans_700Bold', color: colors.text },
   warn: {
     marginTop: 8,
     fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 13,
     color: colors.danger,
+  },
+  modeloBox: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: colors.primaryLight,
+    borderWidth: 1,
+    borderColor: colors.primaryDark,
+  },
+  modeloTitle: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 15,
+    color: colors.primaryDark,
+  },
+  modeloSub: {
+    marginTop: 2,
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
+    color: colors.textMuted,
   },
   selectedLabel: {
     marginTop: 14,
@@ -196,6 +287,13 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#fff', fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14 },
   secondaryText: { color: colors.text, fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 14 },
+  testBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.primaryDark,
+    backgroundColor: colors.primaryLight,
+  },
+  testText: { color: colors.primaryDark, fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14 },
   error: { marginTop: 10, color: colors.danger, fontFamily: 'PlusJakartaSans_500Medium', fontSize: 13 },
   list: { paddingHorizontal: 16, paddingBottom: 24, gap: 8 },
   empty: {
@@ -216,5 +314,17 @@ const styles = StyleSheet.create({
   },
   itemActive: { borderColor: colors.primaryDark, backgroundColor: colors.primaryLight },
   itemName: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 15, color: colors.text },
-  itemAddress: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  itemAddress: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  badge: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 11,
+    color: colors.primaryDark,
+  },
 })

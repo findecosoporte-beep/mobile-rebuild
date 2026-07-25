@@ -79,52 +79,68 @@ export default function PagoScreen() {
       }
       const { data } = await api.post<PagoCreateResponse>('/pagos/', payload)
       const idPago = data.id_pago
-      const impresora = bluetoothImpresoraSoportado() ? await getImpresoraGuardada() : null
+      const puedeBluetooth = bluetoothImpresoraSoportado()
+      const impresora = puedeBluetooth ? await getImpresoraGuardada() : null
 
-      if (impresora) {
-        Alert.alert('Cobro registrado', '¿Imprimir factura por Bluetooth?', [
-          {
-            text: 'Imprimir',
-            onPress: () => {
-              void (async () => {
-                try {
-                  await imprimirFacturaBluetooth(idPago)
-                  Alert.alert('Impresión', 'Factura enviada a la impresora.', [
-                    { text: 'OK', onPress: () => router.back() },
-                  ])
-                } catch (printError) {
-                  Alert.alert(
-                    'Impresión',
-                    printError instanceof Error
-                      ? printError.message
-                      : 'No se pudo imprimir. Puede compartir el PDF.',
-                    [
-                      {
-                        text: 'Compartir PDF',
-                        onPress: () => void compartirFactura(idPago),
-                      },
-                      { text: 'Cerrar', onPress: () => router.back() },
-                    ],
-                  )
-                }
-              })()
-            },
+      const botones: Array<{
+        text: string
+        style?: 'cancel' | 'destructive' | 'default'
+        onPress?: () => void
+      }> = []
+
+      if (puedeBluetooth) {
+        botones.push({
+          text: 'Imprimir',
+          onPress: () => {
+            void (async () => {
+              if (!impresora?.address) {
+                Alert.alert(
+                  'Impresora',
+                  'Primero vaya a la pestaña Impresora, pulse Buscar y seleccione su térmica (ej. 4B-2033PA…).',
+                  [{ text: 'OK', onPress: () => router.back() }],
+                )
+                return
+              }
+              try {
+                await imprimirFacturaBluetooth(idPago)
+                Alert.alert('Impresión', 'Factura enviada a la impresora.', [
+                  { text: 'OK', onPress: () => router.back() },
+                ])
+              } catch (printError) {
+                Alert.alert(
+                  'Impresión',
+                  printError instanceof Error
+                    ? printError.message
+                    : 'No se pudo imprimir. Puede compartir el PDF.',
+                  [
+                    {
+                      text: 'Compartir PDF',
+                      onPress: () => void compartirFactura(idPago),
+                    },
+                    { text: 'Cerrar', onPress: () => router.back() },
+                  ],
+                )
+              }
+            })()
           },
-          {
-            text: 'Compartir PDF',
-            onPress: () => void compartirFactura(idPago),
-          },
-          { text: 'Cerrar', onPress: () => router.back() },
-        ])
-      } else {
-        Alert.alert('Cobro registrado', 'El pago se guardó correctamente.', [
-          {
-            text: 'Ver factura',
-            onPress: () => void compartirFactura(idPago),
-          },
-          { text: 'Cerrar', onPress: () => router.back() },
-        ])
+        })
       }
+
+      botones.push(
+        {
+          text: 'Compartir PDF',
+          onPress: () => void compartirFactura(idPago),
+        },
+        { text: 'Cerrar', style: 'cancel', onPress: () => router.back() },
+      )
+
+      Alert.alert(
+        'Cobro registrado',
+        puedeBluetooth
+          ? '¿Imprimir factura por Bluetooth o compartir PDF?'
+          : 'El pago se guardó. Puede compartir el PDF.',
+        botones,
+      )
     } catch (e) {
       setError(apiErrorMessage(e, 'No se pudo registrar el cobro.'))
     } finally {
