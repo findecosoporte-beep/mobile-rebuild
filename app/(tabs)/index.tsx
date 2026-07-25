@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -10,6 +11,8 @@ import {
   Text,
   View,
 } from 'react-native'
+import * as FileSystem from 'expo-file-system/legacy'
+import * as Sharing from 'expo-sharing'
 
 import { api, apiErrorMessage } from '@/lib/api'
 import { Screen, useTabListPadding } from '@/components/Screen'
@@ -31,7 +34,10 @@ export default function HojaCobrosScreen() {
   const [carteraId, setCarteraId] = useState<number | null>(null)
   const [filas, setFilas] = useState<ReporteIntegracionFila[]>([])
   const [loading, setLoading] = useState(false)
+  const [exportandoPdf, setExportandoPdf] = useState(false)
   const [error, setError] = useState('')
+
+  const carteraActiva = carteras.find((c) => c.id_cartera === carteraId) ?? null
 
   const cargarCarteras = useCallback(async () => {
     const asignadas = profile?.carteras ?? []
@@ -70,6 +76,52 @@ export default function HojaCobrosScreen() {
       if (!silent) setLoading(false)
     }
   }, [carteraId])
+
+  const compartirPdfCartera = useCallback(async () => {
+    if (carteraId == null) {
+      Alert.alert('Cartera', 'Seleccione una cartera para generar el PDF.')
+      return
+    }
+    setExportandoPdf(true)
+    try {
+      const params = new URLSearchParams({
+        id_cartera: String(carteraId),
+        estado: 'activo,pendiente_aprobacion,mora',
+        all: '1',
+        vista: 'seguimiento',
+      })
+      const response = await api.get<ArrayBuffer>(
+        `/prestamos/hoja-cobros-pdf/?${params.toString()}`,
+        { responseType: 'arraybuffer' },
+      )
+      const bytes = new Uint8Array(response.data)
+      let binary = ''
+      const chunk = 0x8000
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+      }
+      const base64 = globalThis.btoa(binary)
+      const slug = (carteraActiva?.nombre || `cartera-${carteraId}`)
+        .replace(/[^\w\-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+      const path = `${FileSystem.cacheDirectory}hoja_cobros_${slug}.pdf`
+      await FileSystem.writeAsStringAsync(path, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Hoja de cobros — ${carteraActiva?.nombre ?? 'Cartera'}`,
+        })
+      } else {
+        Alert.alert('PDF listo', 'El archivo se guardó, pero compartir no está disponible en este dispositivo.')
+      }
+    } catch (e) {
+      Alert.alert('No se pudo generar el PDF', apiErrorMessage(e, 'Error al descargar la hoja de cobros.'))
+    } finally {
+      setExportandoPdf(false)
+    }
+  }, [carteraId, carteraActiva?.nombre])
 
   const refrescar = useCallback(
     async (silent = false) => {
@@ -110,6 +162,25 @@ export default function HojaCobrosScreen() {
           )
         })}
       </View>
+
+      {carteraId != null ? (
+        <Pressable
+          style={[styles.pdfBtn, exportandoPdf && styles.pdfBtnDisabled]}
+          onPress={() => void compartirPdfCartera()}
+          disabled={exportandoPdf}
+        >
+          {exportandoPdf ? (
+            <ActivityIndicator color={colors.primaryDark} size="small" />
+          ) : (
+            <Ionicons name="document-outline" size={18} color={colors.primaryDark} />
+          )}
+          <Text style={styles.pdfBtnText}>
+            {exportandoPdf
+              ? 'Generando PDF…'
+              : `PDF — ${carteraActiva?.nombre ?? 'cartera'}`}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {error ? (
         <View style={styles.errorBox}>
@@ -221,7 +292,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -236,6 +307,25 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
   chipText: { fontFamily: 'PlusJakartaSans_600SemiBold', color: colors.text, fontSize: 13 },
   chipTextActive: { color: '#fff' },
+  pdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    borderRadius: 10,
+    backgroundColor: colors.primaryLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pdfBtnDisabled: { opacity: 0.7 },
+  pdfBtnText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 13,
+    color: colors.primaryDark,
+  },
   list: { paddingBottom: 24 },
   emptyList: { flexGrow: 1, justifyContent: 'center' },
   emptyState: { alignItems: 'center', gap: 12, paddingVertical: 40 },

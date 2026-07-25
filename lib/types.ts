@@ -59,6 +59,8 @@ export interface ReporteIntegracionFila {
   cuotas_atrasadas?: number
   cuotas_atrasadas_numeros?: string
   estado: string
+  cobrado_hoy?: boolean
+  monto_cobrado_hoy?: string
   telefono?: string
   direccion_residencia?: string
   direccion_negocio?: string
