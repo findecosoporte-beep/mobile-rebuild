@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -26,7 +26,7 @@ import * as Sharing from 'expo-sharing'
 
 const REFRESCO_MS = 30000
 
-type ModoHistorial = 'dia' | 'mes'
+type ModoHistorial = 'dia' | 'semana' | 'mes'
 
 interface HistorialFila {
   id_pago: number
@@ -45,6 +45,7 @@ interface HistorialResponse {
   resumen: { registros: number; total_cobrado: string }
   fecha_inicio?: string
   fecha_fin?: string
+  modo?: string
 }
 
 function mesActual(): { mes: string; anio: string } {
@@ -61,32 +62,58 @@ function etiquetaFactura(item: HistorialFila): string {
   return `F${item.id_pago}`
 }
 
+function formatFechaCorta(iso?: string): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.slice(0, 10).split('-')
+  if (!y || !m || !d) return iso
+  return `${d}/${m}/${y}`
+}
+
 export default function HistorialScreen() {
-  const [modo, setModo] = useState<ModoHistorial>('dia')
+  const [modo, setModo] = useState<ModoHistorial>('semana')
   const [filas, setFilas] = useState<HistorialFila[]>([])
   const [total, setTotal] = useState('0')
+  const [fechaInicio, setFechaInicio] = useState('')
+  const [fechaFin, setFechaFin] = useState('')
   const [loading, setLoading] = useState(false)
   const [imprimiendoId, setImprimiendoId] = useState<number | null>(null)
   const [error, setError] = useState('')
+
+  const periodoLabel = useMemo(() => {
+    if (modo === 'dia') return 'hoy'
+    if (modo === 'semana') {
+      if (fechaInicio && fechaFin) {
+        return `esta semana (${formatFechaCorta(fechaInicio)} – ${formatFechaCorta(fechaFin)})`
+      }
+      return 'esta semana'
+    }
+    return 'este mes'
+  }, [modo, fechaInicio, fechaFin])
 
   const cargar = useCallback(
     async (silent = false) => {
       if (!silent) setLoading(true)
       setError('')
       try {
-        const params =
-          modo === 'dia'
-            ? `modo=dia&fecha=${todayIsoDate()}`
-            : (() => {
-                const { mes, anio } = mesActual()
-                return `modo=mes&mes=${mes}&anio=${anio}`
-              })()
+        let params = ''
+        if (modo === 'dia') {
+          params = `modo=dia&fecha=${todayIsoDate()}`
+        } else if (modo === 'semana') {
+          params = `modo=semana&fecha=${todayIsoDate()}`
+        } else {
+          const { mes, anio } = mesActual()
+          params = `modo=mes&mes=${mes}&anio=${anio}`
+        }
         const { data } = await api.get<HistorialResponse>(`/pagos/historial-cobros/?${params}`)
         setFilas(data.filas ?? [])
         setTotal(data.resumen?.total_cobrado ?? '0')
+        setFechaInicio(data.fecha_inicio ?? '')
+        setFechaFin(data.fecha_fin ?? '')
       } catch (e) {
         setError(apiErrorMessage(e, 'No se pudo cargar el historial de facturas.'))
         setFilas([])
+        setFechaInicio('')
+        setFechaFin('')
       } finally {
         if (!silent) setLoading(false)
       }
@@ -177,8 +204,6 @@ export default function HistorialScreen() {
     )
   }
 
-  const periodoLabel = modo === 'dia' ? 'hoy' : 'este mes'
-
   return (
     <Screen edges={['left', 'right']} style={styles.screen}>
       <View style={styles.chips}>
@@ -187,6 +212,12 @@ export default function HistorialScreen() {
           onPress={() => setModo('dia')}
         >
           <Text style={[styles.chipText, modo === 'dia' && styles.chipTextActive]}>Hoy</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.chip, modo === 'semana' && styles.chipActive]}
+          onPress={() => setModo('semana')}
+        >
+          <Text style={[styles.chipText, modo === 'semana' && styles.chipTextActive]}>Semana</Text>
         </Pressable>
         <Pressable
           style={[styles.chip, modo === 'mes' && styles.chipActive]}
@@ -201,17 +232,17 @@ export default function HistorialScreen() {
           <Ionicons name="receipt" size={24} color={colors.primaryDark} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.summaryLabel}>Facturas {periodoLabel}</Text>
+          <Text style={styles.summaryLabel}>Cobros {periodoLabel}</Text>
           <Text style={styles.summaryAmount}>{formatMoney(total)}</Text>
           <View style={styles.countRow}>
             <Ionicons name="documents-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.summaryCount}>{filas.length} factura(s)</Text>
+            <Text style={styles.summaryCount}>{filas.length} cobro(s)</Text>
           </View>
         </View>
       </View>
 
       <Text style={styles.hint}>
-        Toque una factura para reimprimirla (misma del servidor) o compartir PDF.
+        Toque un cobro para reimprimir la factura (misma del servidor) o compartir PDF.
       </Text>
 
       {error ? (
@@ -239,7 +270,7 @@ export default function HistorialScreen() {
             !loading ? (
               <View style={styles.emptyState}>
                 <Ionicons name="calendar-outline" size={40} color={colors.textMuted} />
-                <Text style={styles.empty}>Sin facturas {periodoLabel}.</Text>
+                <Text style={styles.empty}>Sin cobros {periodoLabel}.</Text>
               </View>
             ) : null
           }
@@ -266,6 +297,9 @@ export default function HistorialScreen() {
                     <Text style={styles.meta}>
                       {item.numero_prestamo}
                       {item.documento ? ` · ${item.documento}` : ''}
+                      {modo !== 'dia' && item.fecha_pago
+                        ? ` · ${formatFechaCorta(item.fecha_pago)}`
+                        : ''}
                       {item.hora_pago ? ` · ${item.hora_pago}` : ''}
                     </Text>
                   </View>
@@ -285,7 +319,7 @@ export default function HistorialScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: 16 },
-  chips: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   chip: {
     paddingVertical: 8,
     paddingHorizontal: 16,
